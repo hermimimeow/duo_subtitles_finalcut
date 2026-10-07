@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="toolbar">
+  <div>
+    <h1>Projects</h1>
+    <p class="muted">{{ workspace_dir }}</p>
+  </div>
+  <form class="inline-form" method="post" action="/projects">
+    <input name="project_id" placeholder="project_1" required>
+    <button type="submit">Create</button>
+  </form>
+</section>
+
+<section class="list">
+  {% if projects %}
+    {% for project in projects %}
+      <a class="row" href="/projects/{{ project.id }}">
+        <strong>{{ project.id }}</strong>
+        <span>{{ project.root }}</span>
+      </a>
+    {% endfor %}
+  {% else %}
+    <p>No projects found.</p>
+  {% endif %}
+</section>
+{% endblock %}

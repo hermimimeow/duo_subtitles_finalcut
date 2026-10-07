@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+workspace/*/audio/*
+workspace/*/subtitles/*
+workspace/*/logs/*
+workspace/*/tmp/*
+!workspace/*/audio/.gitkeep
+!workspace/*/subtitles/.gitkeep
+!workspace/*/logs/.gitkeep
+!workspace/*/tmp/.gitkeep
+workspace/*/video/*
+!workspace/*/video/.gitkeep

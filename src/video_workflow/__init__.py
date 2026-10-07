@@ -1,0 +1,3 @@
+"""Local video subtitle workflow package."""
+
+__version__ = "0.1.0"

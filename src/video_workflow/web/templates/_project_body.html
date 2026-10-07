@@ -1,0 +1,88 @@
+<div id="project-body">
+<section class="toolbar">
+  <div>
+    <h1>{{ project.id }}</h1>
+    <p class="muted">{{ project.root }}</p>
+  </div>
+  <form
+    class="inline-form"
+    method="post"
+    action="/projects/{{ project.id }}/run"
+    hx-post="/projects/{{ project.id }}/run"
+    hx-target="#project-body"
+    hx-swap="outerHTML"
+  >
+    <input name="target" value="{{ target }}" aria-label="Target language">
+    <label class="check"><input type="checkbox" name="force" value="true"> Force</label>
+    <button type="submit">Run Full Pipeline</button>
+  </form>
+</section>
+
+{% if error %}
+  <div class="alert">{{ error }}</div>
+{% endif %}
+
+<section class="steps">
+  {% for state in states %}
+    <article class="step">
+      <div>
+        <h2>{{ state.name.value }}</h2>
+        <p class="status status-{{ state.status.value }}">{{ state.status.value }}</p>
+        <p>{{ state.message }}</p>
+      </div>
+      <form
+        method="post"
+        action="/projects/{{ project.id }}/steps/{{ state.name.value }}"
+        hx-post="/projects/{{ project.id }}/steps/{{ state.name.value }}"
+        hx-target="#project-body"
+        hx-swap="outerHTML"
+      >
+        <input type="hidden" name="target" value="{{ target }}">
+        <button type="submit" {% if not state.can_run %}disabled{% endif %}>Run</button>
+        <label class="check"><input type="checkbox" name="force" value="true"> Force</label>
+      </form>
+    </article>
+  {% endfor %}
+</section>
+
+<section class="grid">
+  <article class="panel">
+    <h2>Video</h2>
+    <pre>{{ previews.video }}</pre>
+  </article>
+  <article class="panel">
+    <h2>Audio</h2>
+    <pre>{{ previews.audio }}</pre>
+  </article>
+  <article class="panel">
+    <h2>Source SRT</h2>
+    <pre>{{ previews.source_srt }}</pre>
+  </article>
+  <article class="panel">
+    <h2>Translated SRT</h2>
+    <pre>{{ previews.translated_srt }}</pre>
+  </article>
+  <article class="panel wide">
+    <h2>Final SRT</h2>
+    <pre>{{ previews.final_srt }}</pre>
+  </article>
+</section>
+<section class="grid">
+  <article class="panel">
+    <h2>Extract Log</h2>
+    <pre>{{ previews.extract_log }}</pre>
+  </article>
+  <article class="panel">
+    <h2>Transcribe Log</h2>
+    <pre>{{ previews.transcribe_log }}</pre>
+  </article>
+  <article class="panel">
+    <h2>Translate Log</h2>
+    <pre>{{ previews.translate_log }}</pre>
+  </article>
+  <article class="panel">
+    <h2>Merge Log</h2>
+    <pre>{{ previews.merge_log }}</pre>
+  </article>
+</section>
+</div>
