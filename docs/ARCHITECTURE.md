@@ -202,6 +202,7 @@ Behavior:
 
 - Parse source SRT into cues.
 - Send text and cue indexes to Gemini in batches.
+- Retry a batch on temporary Gemini errors (503, 429), waiting 2s then 4s. Other batches are not repeated.
 - Preserve timings exactly.
 - Render translated SRT.
 - Validate cue count and timestamp alignment.
@@ -260,6 +261,8 @@ Recommended flow:
 - Missing required input should produce a clear user-facing message.
 - Ambiguous video input should ask the user to choose or update `project.json`.
 - Provider errors should be logged with enough detail to diagnose.
+- Temporary provider errors (503, 429) are retried per translation batch. Other provider errors fail the step.
+- CLI errors print `Error: ...` to stderr and exit with code 1.
 - Secrets must not be written to logs.
 - A failed step should mark only that step as failed.
 
