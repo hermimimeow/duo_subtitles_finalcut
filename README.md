@@ -11,7 +11,7 @@ workspace/project_1/video/project_1.mp4
   -> workspace/project_1/audio/project_1.mp3
   -> workspace/project_1/subtitles/project_1.yue.srt
   -> workspace/project_1/subtitles/project_1.en.srt
-  -> workspace/project_1/subtitles/project_1.final.srt
+  -> workspace/project_1/subtitles/project_1.en.final.srt
 ```
 
 Pipeline steps:
@@ -36,7 +36,7 @@ workspace/
     subtitles/
       project_1.yue.srt
       project_1.en.srt
-      project_1.final.srt
+      project_1.en.final.srt
     logs/
     tmp/
 ```
@@ -99,7 +99,7 @@ The app runs on `http://127.0.0.1:8000` by default and allows the user to:
 
 ## Configuration
 
-Settings live in `.env`.
+Settings live in `.env`. A relative `WORKSPACE_DIR` is relative to the folder that contains `.env`, so the app finds the same workspace from any directory.
 
 Expected settings:
 
