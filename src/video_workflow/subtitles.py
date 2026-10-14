@@ -16,6 +16,7 @@ class SubtitleError(RuntimeError):
 
 
 def format_timestamp(seconds: float) -> str:
+    """Format seconds as an SRT timestamp, such as 00:01:02,500."""
     if seconds < 0:
         raise ValueError("Subtitle timestamp cannot be negative")
     milliseconds = round(seconds * 1000)
@@ -26,6 +27,10 @@ def format_timestamp(seconds: float) -> str:
 
 
 def parse_timestamp(value: str) -> float:
+    """Parse an SRT timestamp such as 00:01:02,500 into seconds.
+
+    Raises SubtitleError if the timestamp is malformed.
+    """
     try:
         clock, millis = value.split(",")
         hours, minutes, seconds = clock.split(":")
@@ -40,6 +45,7 @@ def parse_timestamp(value: str) -> float:
 
 
 def render_srt(cues: list[SubtitleCue] | tuple[SubtitleCue, ...]) -> str:
+    """Render cues as SRT text, numbered from 1."""
     blocks: list[str] = []
     for output_index, cue in enumerate(cues, start=1):
         blocks.append(
@@ -55,11 +61,16 @@ def render_srt(cues: list[SubtitleCue] | tuple[SubtitleCue, ...]) -> str:
 
 
 def write_srt(path: Path, cues: list[SubtitleCue] | tuple[SubtitleCue, ...]) -> None:
+    """Write cues to path as SRT, creating parent folders as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_srt(cues), encoding="utf-8")
 
 
 def parse_srt_text(text: str) -> list[SubtitleCue]:
+    """Parse SRT text into cues.
+
+    Raises SubtitleError if a block is malformed.
+    """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
         return []
@@ -94,12 +105,17 @@ def parse_srt_text(text: str) -> list[SubtitleCue]:
 
 
 def read_srt(path: Path) -> list[SubtitleCue]:
+    """Read and parse an SRT file.
+
+    Raises FileNotFoundError if the file is missing.
+    """
     if not path.exists():
         raise FileNotFoundError(path)
     return parse_srt_text(path.read_text(encoding="utf-8"))
 
 
 def validate_srt(path: Path) -> bool:
+    """Return True if the file parses as SRT with at least one cue, otherwise False."""
     try:
         return bool(read_srt(path))
     except (OSError, SubtitleError, UnicodeDecodeError):
@@ -107,6 +123,9 @@ def validate_srt(path: Path) -> bool:
 
 
 def cues_aligned(left: list[SubtitleCue], right: list[SubtitleCue], tolerance: float = 0.001) -> bool:
+    """Return True if both cue lists have the same length and the same start and end times,
+    within tolerance seconds.
+    """
     if len(left) != len(right):
         return False
     for left_cue, right_cue in zip(left, right):
@@ -121,6 +140,11 @@ def merge_cues(
     source_cues: list[SubtitleCue],
     translated_cues: list[SubtitleCue],
 ) -> list[SubtitleCue]:
+    """Combine source and translated cues into one bilingual list.
+
+    Each merged cue has the source text on the first line and the translation on the second.
+    Raises SubtitleError if the timings do not match.
+    """
     if not cues_aligned(source_cues, translated_cues):
         raise SubtitleError("Source and translated subtitles are not aligned")
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 class StepName(str, Enum):
+    """Pipeline step names, in the order the steps run."""
     EXTRACT = "extract"
     TRANSCRIBE = "transcribe"
     TRANSLATE = "translate"
@@ -14,6 +15,7 @@ class StepName(str, Enum):
 
 
 class StepStatus(str, Enum):
+    """How ready a step is: complete, ready, missing input, invalid, or failed."""
     MISSING_INPUT = "missing_input"
     READY = "ready"
     COMPLETE = "complete"
@@ -26,6 +28,7 @@ SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
 
 @dataclass(frozen=True)
 class ProjectMetadata:
+    """Durable project settings stored in project.json."""
     id: str
     source_video: str | None = None
     source_language: str = "yue"
@@ -35,6 +38,7 @@ class ProjectMetadata:
 
     @classmethod
     def new(cls, project_id: str, source_language: str, target_language: str) -> "ProjectMetadata":
+        """Create metadata with created and updated timestamps set to now (UTC)."""
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         return cls(
             id=project_id,
@@ -47,6 +51,7 @@ class ProjectMetadata:
 
 @dataclass(frozen=True)
 class Project:
+    """A project: its id, its folder, and its loaded metadata."""
     id: str
     root: Path
     metadata: ProjectMetadata
@@ -54,6 +59,7 @@ class Project:
 
 @dataclass(frozen=True)
 class SubtitleCue:
+    """One subtitle entry: its index, start and end times in seconds, and text."""
     index: int
     start_seconds: float
     end_seconds: float
@@ -62,6 +68,7 @@ class SubtitleCue:
 
 @dataclass(frozen=True)
 class StepState:
+    """What one pipeline step looks like right now: status, paths, and a message for the user."""
     name: StepName
     status: StepStatus
     input_paths: tuple[Path, ...]
@@ -73,4 +80,5 @@ class StepState:
 
     @property
     def is_complete(self) -> bool:
+        """True when the step's output exists and is valid."""
         return self.status == StepStatus.COMPLETE
