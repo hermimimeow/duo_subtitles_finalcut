@@ -4,12 +4,13 @@ import os
 import subprocess
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from video_workflow.audio import extract_audio
 from video_workflow.config import Settings
-from video_workflow.models import Project, StepName, StepState, StepStatus
+from video_workflow.models import StepName, StepState, StepStatus
 from video_workflow.projects import ProjectPaths, ProjectStore
 from video_workflow.subtitles import (
     cues_aligned,
@@ -24,6 +25,14 @@ from video_workflow.translation import GeminiTranslator
 
 class PipelineError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _StepMessages:
+    complete: str
+    missing: str
+    invalid: str
+    ready: str
 
 
 class Pipeline:
@@ -43,188 +52,110 @@ class Pipeline:
         project = self.store.load(project_id)
         paths = ProjectPaths(project, target_language)
         return [
-            self.extract_state(project, paths),
+            self.extract_state(paths),
             self.transcribe_state(paths),
             self.translate_state(paths),
             self.merge_state(paths),
         ]
 
-    def extract_state(self, project: Project, paths: ProjectPaths) -> StepState:
+    def extract_state(self, paths: ProjectPaths) -> StepState:
         source_video: Path | None = None
-        message = ""
+        error_message = ""
         try:
-            source_video = self.store.find_source_video(project)
+            source_video = self.store.find_source_video(paths.project)
         except Exception as error:
-            message = str(error)
+            error_message = str(error)
 
-        output_valid = paths.audio.exists() and paths.audio.stat().st_size > 0
-        if output_valid:
-            status = StepStatus.COMPLETE
-            can_run = True
-            message = f"Audio exists: {paths.audio.name}"
-        elif source_video is None:
-            status = StepStatus.MISSING_INPUT
-            can_run = False
-        else:
-            status = StepStatus.READY
-            can_run = True
-            message = f"Ready to extract from {source_video.name}"
-
-        return StepState(
-            name=StepName.EXTRACT,
-            status=status,
-            input_paths=tuple(path for path in (source_video,) if path is not None),
+        return _step_state(
+            StepName.EXTRACT,
+            input_paths=() if source_video is None else (source_video,),
             output_paths=(paths.audio,),
             log_path=paths.extract_log,
-            can_run=can_run,
-            can_rerun=output_valid,
-            message=message,
+            output_valid=_is_nonempty_file(paths.audio),
+            inputs_valid=source_video is not None,
+            output_exists=paths.audio.exists(),
+            messages=_StepMessages(
+                complete=f"Audio exists: {paths.audio.name}",
+                missing=error_message,
+                invalid=f"Audio exists but is invalid: {paths.audio.name}",
+                ready="" if source_video is None else f"Ready to extract from {source_video.name}",
+            ),
         )
 
     def transcribe_state(self, paths: ProjectPaths) -> StepState:
-        audio_ready = paths.audio.exists() and paths.audio.stat().st_size > 0
-        output_valid = validate_srt(paths.source_srt)
-
-        if output_valid:
-            status = StepStatus.COMPLETE
-            can_run = True
-            message = f"Source subtitles exist: {paths.source_srt.name}"
-        elif not audio_ready:
-            status = StepStatus.MISSING_INPUT
-            can_run = False
-            message = f"Missing audio: {paths.audio.name}"
-        elif paths.source_srt.exists():
-            status = StepStatus.INVALID
-            can_run = True
-            message = f"Source subtitle exists but is invalid: {paths.source_srt.name}"
-        else:
-            status = StepStatus.READY
-            can_run = True
-            message = "Ready to transcribe"
-
-        return StepState(
-            name=StepName.TRANSCRIBE,
-            status=status,
+        return _step_state(
+            StepName.TRANSCRIBE,
             input_paths=(paths.audio,),
             output_paths=(paths.source_srt,),
             log_path=paths.transcribe_log,
-            can_run=can_run,
-            can_rerun=output_valid,
-            message=message,
+            output_valid=validate_srt(paths.source_srt),
+            inputs_valid=_is_nonempty_file(paths.audio),
+            output_exists=paths.source_srt.exists(),
+            messages=_StepMessages(
+                complete=f"Source subtitles exist: {paths.source_srt.name}",
+                missing=f"Missing audio: {paths.audio.name}",
+                invalid=f"Source subtitle exists but is invalid: {paths.source_srt.name}",
+                ready="Ready to transcribe",
+            ),
         )
 
     def translate_state(self, paths: ProjectPaths) -> StepState:
-        source_valid = validate_srt(paths.source_srt)
-        translated_valid = False
-        if paths.translated_srt.exists():
-            translated_valid = self._translated_output_valid(paths)
-
-        if translated_valid:
-            status = StepStatus.COMPLETE
-            can_run = True
-            message = f"Translated subtitles exist: {paths.translated_srt.name}"
-        elif not source_valid:
-            status = StepStatus.MISSING_INPUT
-            can_run = False
-            message = f"Missing valid source subtitles: {paths.source_srt.name}"
-        elif paths.translated_srt.exists():
-            status = StepStatus.INVALID
-            can_run = True
-            message = f"Translated subtitle exists but is invalid: {paths.translated_srt.name}"
-        else:
-            status = StepStatus.READY
-            can_run = True
-            message = "Ready to translate"
-
-        return StepState(
-            name=StepName.TRANSLATE,
-            status=status,
+        return _step_state(
+            StepName.TRANSLATE,
             input_paths=(paths.source_srt,),
             output_paths=(paths.translated_srt,),
             log_path=paths.translate_log,
-            can_run=can_run,
-            can_rerun=translated_valid,
-            message=message,
+            output_valid=paths.translated_srt.exists() and self._translated_output_valid(paths),
+            inputs_valid=validate_srt(paths.source_srt),
+            output_exists=paths.translated_srt.exists(),
+            messages=_StepMessages(
+                complete=f"Translated subtitles exist: {paths.translated_srt.name}",
+                missing=f"Missing valid source subtitles: {paths.source_srt.name}",
+                invalid=f"Translated subtitle exists but is invalid: {paths.translated_srt.name}",
+                ready="Ready to translate",
+            ),
         )
 
     def merge_state(self, paths: ProjectPaths) -> StepState:
         inputs_valid = validate_srt(paths.source_srt) and self._translated_output_valid(paths)
-        output_valid = validate_srt(paths.final_srt)
-        if output_valid and inputs_valid:
-            output_valid = self._final_output_valid(paths)
-
-        if output_valid:
-            status = StepStatus.COMPLETE
-            can_run = True
-            message = f"Final subtitles exist: {paths.final_srt.name}"
-        elif not inputs_valid:
-            status = StepStatus.MISSING_INPUT
-            can_run = False
-            message = "Missing valid source or translated subtitles"
-        elif paths.final_srt.exists():
-            status = StepStatus.INVALID
-            can_run = True
-            message = f"Final subtitle exists but is invalid: {paths.final_srt.name}"
-        else:
-            status = StepStatus.READY
-            can_run = True
-            message = "Ready to merge"
-
-        return StepState(
-            name=StepName.MERGE,
-            status=status,
+        # A final file that is valid on its own still counts as complete when the
+        # inputs are gone; only check alignment against the inputs when they exist.
+        output_valid = validate_srt(paths.final_srt) and (
+            not inputs_valid or self._final_output_valid(paths)
+        )
+        return _step_state(
+            StepName.MERGE,
             input_paths=(paths.source_srt, paths.translated_srt),
             output_paths=(paths.final_srt,),
             log_path=paths.merge_log,
-            can_run=can_run,
-            can_rerun=output_valid,
-            message=message,
+            output_valid=output_valid,
+            inputs_valid=inputs_valid,
+            output_exists=paths.final_srt.exists(),
+            messages=_StepMessages(
+                complete=f"Final subtitles exist: {paths.final_srt.name}",
+                missing="Missing valid source or translated subtitles",
+                invalid=f"Final subtitle exists but is invalid: {paths.final_srt.name}",
+                ready="Ready to merge",
+            ),
         )
 
     def run_extract(self, project_id: str, force: bool = False) -> StepState:
-        project = self.store.load(project_id)
-        paths = ProjectPaths(project)
-        state = self.extract_state(project, paths)
-        if state.is_complete and not force:
-            return state
-        if not state.can_run:
-            raise PipelineError(state.message)
-
-        source_video = self.store.find_source_video(project)
-        tmp_output = paths.tmp_dir / f"{paths.audio.name}.tmp"
-
-        def operation() -> None:
-            result = extract_audio(source_video, tmp_output, self.settings.ffmpeg_binary)
-            if result.stdout:
-                print(result.stdout)
-            if result.stderr:
-                print(result.stderr)
-            _require_nonempty_file(tmp_output, "audio extraction produced an empty file")
-
-        self._run_logged(paths.extract_log, operation)
-        _replace_file(tmp_output, paths.audio)
-        return self.extract_state(project, paths)
+        return self._run_step(
+            project_id,
+            None,
+            force,
+            state_for=self.extract_state,
+            operation=self._extract_audio,
+        )
 
     def run_transcribe(self, project_id: str, force: bool = False) -> StepState:
-        project = self.store.load(project_id)
-        paths = ProjectPaths(project)
-        state = self.transcribe_state(paths)
-        if state.is_complete and not force:
-            return state
-        if not state.can_run:
-            raise PipelineError(state.message)
-
-        tmp_output = paths.tmp_dir / f"{paths.source_srt.name}.tmp"
-
-        def operation() -> None:
-            cues = self.transcriber_factory(self.settings).transcribe(paths.audio)
-            write_srt(tmp_output, cues)
-            if not validate_srt(tmp_output):
-                raise PipelineError("transcription produced invalid SRT")
-
-        self._run_logged(paths.transcribe_log, operation)
-        _replace_file(tmp_output, paths.source_srt)
-        return self.transcribe_state(paths)
+        return self._run_step(
+            project_id,
+            None,
+            force,
+            state_for=self.transcribe_state,
+            operation=self._transcribe_audio,
+        )
 
     def run_translate(
         self,
@@ -232,29 +163,13 @@ class Pipeline:
         target_language: str | None = None,
         force: bool = False,
     ) -> StepState:
-        project = self.store.load(project_id)
-        target = target_language or project.metadata.target_language
-        paths = ProjectPaths(project, target)
-        state = self.translate_state(paths)
-        if state.is_complete and not force:
-            return state
-        if not state.can_run:
-            raise PipelineError(state.message)
-
-        tmp_output = paths.tmp_dir / f"{paths.translated_srt.name}.tmp"
-
-        def operation() -> None:
-            source_cues = read_srt(paths.source_srt)
-            translated_cues = self.translator_factory(self.settings).translate(source_cues, target)
-            if not cues_aligned(source_cues, translated_cues):
-                raise PipelineError("translation produced misaligned subtitle timings")
-            write_srt(tmp_output, translated_cues)
-            if not validate_srt(tmp_output):
-                raise PipelineError("translation produced invalid SRT")
-
-        self._run_logged(paths.translate_log, operation)
-        _replace_file(tmp_output, paths.translated_srt)
-        return self.translate_state(paths)
+        return self._run_step(
+            project_id,
+            target_language,
+            force,
+            state_for=self.translate_state,
+            operation=self._translate_subtitles,
+        )
 
     def run_merge(
         self,
@@ -262,27 +177,13 @@ class Pipeline:
         target_language: str | None = None,
         force: bool = False,
     ) -> StepState:
-        project = self.store.load(project_id)
-        paths = ProjectPaths(project, target_language)
-        state = self.merge_state(paths)
-        if state.is_complete and not force:
-            return state
-        if not state.can_run:
-            raise PipelineError(state.message)
-
-        tmp_output = paths.tmp_dir / f"{paths.final_srt.name}.tmp"
-
-        def operation() -> None:
-            source_cues = read_srt(paths.source_srt)
-            translated_cues = read_srt(paths.translated_srt)
-            merged = merge_cues(source_cues, translated_cues)
-            write_srt(tmp_output, merged)
-            if not validate_srt(tmp_output):
-                raise PipelineError("merge produced invalid SRT")
-
-        self._run_logged(paths.merge_log, operation)
-        _replace_file(tmp_output, paths.final_srt)
-        return self.merge_state(paths)
+        return self._run_step(
+            project_id,
+            target_language,
+            force,
+            state_for=self.merge_state,
+            operation=self._merge_subtitles,
+        )
 
     def run_all(
         self,
@@ -298,28 +199,68 @@ class Pipeline:
         ]
         return states
 
+    def _run_step(
+        self,
+        project_id: str,
+        target_language: str | None,
+        force: bool,
+        *,
+        state_for: Callable[[ProjectPaths], StepState],
+        operation: Callable[[StepState, ProjectPaths, Path], None],
+    ) -> StepState:
+        project = self.store.load(project_id)
+        paths = ProjectPaths(project, target_language)
+        state = state_for(paths)
+        if state.is_complete and not force:
+            return state
+        if not state.can_run:
+            raise PipelineError(state.message)
+
+        output = state.output_paths[0]
+        tmp_output = paths.tmp_dir / f"{output.name}.tmp"
+        self._run_logged(state.log_path, lambda: operation(state, paths, tmp_output))
+        _replace_file(tmp_output, output)
+        return state_for(paths)
+
+    def _extract_audio(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        source_video = state.input_paths[0]
+        result = extract_audio(source_video, tmp_output, self.settings.ffmpeg_binary)
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        _require_nonempty_file(tmp_output, "audio extraction produced an empty file")
+
+    def _transcribe_audio(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        cues = self.transcriber_factory(self.settings).transcribe(paths.audio)
+        write_srt(tmp_output, cues)
+        if not validate_srt(tmp_output):
+            raise PipelineError("transcription produced invalid SRT")
+
+    def _translate_subtitles(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        source_cues = read_srt(paths.source_srt)
+        translated_cues = self.translator_factory(self.settings).translate(
+            source_cues, paths.target_language
+        )
+        if not cues_aligned(source_cues, translated_cues):
+            raise PipelineError("translation produced misaligned subtitle timings")
+        write_srt(tmp_output, translated_cues)
+        if not validate_srt(tmp_output):
+            raise PipelineError("translation produced invalid SRT")
+
+    def _merge_subtitles(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        source_cues = read_srt(paths.source_srt)
+        translated_cues = read_srt(paths.translated_srt)
+        merged = merge_cues(source_cues, translated_cues)
+        write_srt(tmp_output, merged)
+        if not validate_srt(tmp_output):
+            raise PipelineError("merge produced invalid SRT")
+
     def _translated_output_valid(self, paths: ProjectPaths) -> bool:
-        try:
-            source_cues = read_srt(paths.source_srt)
-            translated_cues = read_srt(paths.translated_srt)
-        except Exception:
-            return False
-        return cues_aligned(source_cues, translated_cues)
+        return _files_aligned(paths.source_srt, paths.translated_srt)
 
     def _final_output_valid(self, paths: ProjectPaths) -> bool:
-        try:
-            source_cues = read_srt(paths.source_srt)
-            final_cues = read_srt(paths.final_srt)
-        except Exception:
-            return False
-        if len(source_cues) != len(final_cues):
-            return False
-        for source, final in zip(source_cues, final_cues):
-            if abs(source.start_seconds - final.start_seconds) > 0.001:
-                return False
-            if abs(source.end_seconds - final.end_seconds) > 0.001:
-                return False
-        return True
+        return _files_aligned(paths.source_srt, paths.final_srt)
 
     def _run_logged(self, log_path: Path, operation: Callable[[], None]) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -343,11 +284,56 @@ class Pipeline:
             raise
 
 
+def _step_state(
+    name: StepName,
+    *,
+    input_paths: tuple[Path, ...],
+    output_paths: tuple[Path, ...],
+    log_path: Path,
+    output_valid: bool,
+    inputs_valid: bool,
+    output_exists: bool,
+    messages: _StepMessages,
+) -> StepState:
+    if output_valid:
+        status, can_run, message = StepStatus.COMPLETE, True, messages.complete
+    elif not inputs_valid:
+        status, can_run, message = StepStatus.MISSING_INPUT, False, messages.missing
+    elif output_exists:
+        status, can_run, message = StepStatus.INVALID, True, messages.invalid
+    else:
+        status, can_run, message = StepStatus.READY, True, messages.ready
+
+    return StepState(
+        name=name,
+        status=status,
+        input_paths=input_paths,
+        output_paths=output_paths,
+        log_path=log_path,
+        can_run=can_run,
+        can_rerun=output_valid,
+        message=message,
+    )
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    return path.exists() and path.stat().st_size > 0
+
+
+def _files_aligned(source_path: Path, other_path: Path) -> bool:
+    try:
+        source_cues = read_srt(source_path)
+        other_cues = read_srt(other_path)
+    except Exception:
+        return False
+    return cues_aligned(source_cues, other_cues)
+
+
 def _replace_file(tmp_output: Path, final_output: Path) -> None:
     final_output.parent.mkdir(parents=True, exist_ok=True)
     os.replace(tmp_output, final_output)
 
 
 def _require_nonempty_file(path: Path, message: str) -> None:
-    if not path.exists() or path.stat().st_size == 0:
+    if not _is_nonempty_file(path):
         raise PipelineError(message)
