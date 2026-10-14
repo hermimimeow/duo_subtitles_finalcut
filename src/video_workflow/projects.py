@@ -111,24 +111,23 @@ class ProjectStore:
         validate_project_id(project_id)
         self.ensure_workspace()
         root = self.workspace_dir / project_id
-        if root.exists() and any(root.iterdir()):
-            project = self.load(project_id)
-            ProjectPaths(project).ensure_dirs()
-            return project
-
-        metadata = ProjectMetadata.new(
-            project_id,
-            self.settings.default_source_language,
-            self.settings.default_target_language,
-        )
         root.mkdir(parents=True, exist_ok=True)
-        project = Project(project_id, root, metadata)
+
+        project = self.load(project_id)
         paths = ProjectPaths(project)
         paths.ensure_dirs()
-        write_metadata(paths.metadata, metadata)
+        if not paths.metadata.exists():
+            metadata = ProjectMetadata.new(
+                project_id,
+                self.settings.default_source_language,
+                self.settings.default_target_language,
+            )
+            write_metadata(paths.metadata, metadata)
+            project = Project(project_id, root, metadata)
         return project
 
     def load(self, project_id: str) -> Project:
+        """Read a project without writing to disk."""
         validate_project_id(project_id)
         root = self.workspace_dir / project_id
         if not root.exists() or not root.is_dir():
@@ -138,20 +137,15 @@ class ProjectStore:
         if metadata_path.exists():
             metadata = read_metadata(metadata_path)
         else:
-            metadata = ProjectMetadata.new(
-                project_id,
-                self.settings.default_source_language,
-                self.settings.default_target_language,
+            metadata = ProjectMetadata(
+                id=project_id,
+                source_language=self.settings.default_source_language,
+                target_language=self.settings.default_target_language,
             )
-            write_metadata(metadata_path, metadata)
-
-        project = Project(project_id, root, metadata)
-        ProjectPaths(project).ensure_dirs()
-        return project
+        return Project(project_id, root, metadata)
 
     def find_source_video(self, project: Project) -> Path:
         paths = ProjectPaths(project)
-        paths.ensure_dirs()
 
         if project.metadata.source_video:
             selected = project.root / project.metadata.source_video
@@ -163,7 +157,7 @@ class ProjectStore:
 
         videos = [
             path
-            for path in sorted(paths.video_dir.iterdir())
+            for path in (sorted(paths.video_dir.iterdir()) if paths.video_dir.is_dir() else [])
             if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
         ]
         if not videos:

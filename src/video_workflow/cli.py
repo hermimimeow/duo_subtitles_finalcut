@@ -121,9 +121,10 @@ def web() -> None:
     except ImportError as error:
         raise typer.BadParameter("uvicorn is not installed.") from error
 
+    from video_workflow.web.app import create_app
+
     uvicorn.run(
-        "video_workflow.web.app:create_app",
-        factory=True,
+        create_app(settings),
         host=settings.web_host,
         port=settings.web_port,
         reload=False,

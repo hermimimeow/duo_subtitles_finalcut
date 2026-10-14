@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from video_workflow.config import load_settings
+from video_workflow.config import Settings, load_settings
 from video_workflow.models import StepName
 from video_workflow.pipeline import Pipeline
 from video_workflow.projects import ProjectPaths, ProjectStore
@@ -16,8 +16,8 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-def create_app() -> FastAPI:
-    settings = load_settings()
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or load_settings()
     store = ProjectStore(settings)
     pipeline = Pipeline(settings, store)
 
@@ -137,6 +137,8 @@ def _previews(paths: ProjectPaths) -> dict[str, str]:
 
 
 def _video_preview(paths: ProjectPaths) -> str:
+    if not paths.video_dir.is_dir():
+        return "No video file staged."
     videos = sorted(path.name for path in paths.video_dir.iterdir() if path.is_file())
     return "\n".join(videos) if videos else "No video file staged."
 
