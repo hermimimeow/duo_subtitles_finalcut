@@ -62,7 +62,7 @@ class ProjectPaths:
 
     @property
     def final_srt(self) -> Path:
-        return self.subtitles_dir / f"{self.project.id}.final.srt"
+        return self.subtitles_dir / f"{self.project.id}.{self.target_language}.final.srt"
 
     @property
     def extract_log(self) -> Path:
@@ -78,7 +78,7 @@ class ProjectPaths:
 
     @property
     def merge_log(self) -> Path:
-        return self.logs_dir / "merge.log"
+        return self.logs_dir / f"merge-{self.target_language}.log"
 
     def ensure_dirs(self) -> None:
         for directory in (
