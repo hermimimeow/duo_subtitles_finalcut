@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable
 
 from video_workflow.config import Settings
 from video_workflow.models import SubtitleCue
+
+if TYPE_CHECKING:
+    from google import genai
 
 
 class TranslationError(RuntimeError):
@@ -29,11 +34,21 @@ TRANSLATION_SCHEMA = {
     "required": ["translations"],
 }
 
+DEFAULT_RETRY_DELAYS = (2.0, 4.0)
+
 
 class GeminiTranslator:
-    def __init__(self, settings: Settings, batch_size: int = 25) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        batch_size: int = 25,
+        retry_delays: tuple[float, ...] = DEFAULT_RETRY_DELAYS,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self.settings = settings
         self.batch_size = max(batch_size, 1)
+        self.retry_delays = retry_delays
+        self.sleep = sleep
 
     def translate(self, cues: list[SubtitleCue], target_language: str) -> list[SubtitleCue]:
         if not cues:
@@ -54,23 +69,45 @@ class GeminiTranslator:
 
     def _translate_batch(
         self,
-        client: object,
+        client: genai.Client,
         cues: list[SubtitleCue],
         target_language: str,
     ) -> list[SubtitleCue]:
-        response = client.models.generate_content(
-            model=self.settings.gemini_model,
-            contents=build_translation_prompt(cues, target_language),
-            config={
-                "temperature": 0.25,
-                "response_mime_type": "application/json",
-                "response_json_schema": TRANSLATION_SCHEMA,
-            },
-        )
+        response = self._generate_with_retries(client, cues, target_language)
         payload = response.parsed if getattr(response, "parsed", None) is not None else None
         if payload is None:
             payload = json.loads(getattr(response, "text", "") or "{}")
         return apply_translation_payload(cues, payload)
+
+    def _generate_with_retries(
+        self,
+        client: genai.Client,
+        cues: list[SubtitleCue],
+        target_language: str,
+    ):
+        """Retry one batch on temporary Gemini errors; other batches are not affected."""
+        attempts = len(self.retry_delays) + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                return client.models.generate_content(
+                    model=self.settings.gemini_model,
+                    contents=build_translation_prompt(cues, target_language),
+                    config={
+                        "temperature": 0.25,
+                        "response_mime_type": "application/json",
+                        "response_json_schema": TRANSLATION_SCHEMA,
+                    },
+                )
+            except Exception as error:
+                if attempt == attempts or not _is_temporary(error):
+                    raise
+                delay = self.retry_delays[attempt - 1]
+                print(
+                    f"Gemini temporary error (attempt {attempt} of {attempts}), "
+                    f"retrying in {delay:g}s: {error}"
+                )
+                self.sleep(delay)
+        raise AssertionError("unreachable: the final attempt either returns or raises")
 
 
 def build_translation_prompt(cues: list[SubtitleCue], target_language: str) -> str:
@@ -128,6 +165,17 @@ def apply_translation_payload(cues: list[SubtitleCue], payload: object) -> list[
     if missing:
         raise TranslationError(f"Gemini response missed translation rows: {missing}")
     return translated
+
+
+def _is_temporary(error: Exception) -> bool:
+    """Server errors (503) and rate limits (429) are worth retrying."""
+    try:
+        from google.genai import errors
+    except ImportError:
+        return False
+    if isinstance(error, errors.ServerError):
+        return True
+    return isinstance(error, errors.APIError) and getattr(error, "code", None) == 429
 
 
 def _batch(cues: list[SubtitleCue], batch_size: int) -> list[list[SubtitleCue]]:
