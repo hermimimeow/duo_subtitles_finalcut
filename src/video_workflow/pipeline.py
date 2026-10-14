@@ -24,11 +24,13 @@ from video_workflow.translation import GeminiTranslator
 
 
 class PipelineError(RuntimeError):
+    """Raised when a step cannot run or its output is invalid."""
     pass
 
 
 @dataclass(frozen=True)
 class _StepMessages:
+    """The message shown for each possible status of one step."""
     complete: str
     missing: str
     invalid: str
@@ -36,6 +38,10 @@ class _StepMessages:
 
 
 class Pipeline:
+    """Runs the four pipeline steps and reports their status.
+
+    The transcriber and translator factories can be replaced in tests.
+    """
     def __init__(
         self,
         settings: Settings,
@@ -49,6 +55,7 @@ class Pipeline:
         self.translator_factory = translator_factory
 
     def status(self, project_id: str, target_language: str | None = None) -> list[StepState]:
+        """Return the status of all four steps for a project and target language."""
         project = self.store.load(project_id)
         paths = ProjectPaths(project, target_language)
         return [
@@ -59,6 +66,7 @@ class Pipeline:
         ]
 
     def extract_state(self, paths: ProjectPaths) -> StepState:
+        """Work out the status of the extract step (video to MP3)."""
         source_video: Path | None = None
         error_message = ""
         try:
@@ -83,6 +91,7 @@ class Pipeline:
         )
 
     def transcribe_state(self, paths: ProjectPaths) -> StepState:
+        """Work out the status of the transcribe step (MP3 to source SRT)."""
         return _step_state(
             StepName.TRANSCRIBE,
             input_paths=(paths.audio,),
@@ -100,6 +109,7 @@ class Pipeline:
         )
 
     def translate_state(self, paths: ProjectPaths) -> StepState:
+        """Work out the status of the translate step (source SRT to target SRT)."""
         return _step_state(
             StepName.TRANSLATE,
             input_paths=(paths.source_srt,),
@@ -117,6 +127,7 @@ class Pipeline:
         )
 
     def merge_state(self, paths: ProjectPaths) -> StepState:
+        """Work out the status of the merge step (source and target SRT to final SRT)."""
         inputs_valid = validate_srt(paths.source_srt) and self._translated_output_valid(paths)
         # A final file that is valid on its own still counts as complete when the
         # inputs are gone; only check alignment against the inputs when they exist.
@@ -140,6 +151,7 @@ class Pipeline:
         )
 
     def run_extract(self, project_id: str, force: bool = False) -> StepState:
+        """Run the extract step. Skips it if already complete, unless force is True."""
         return self._run_step(
             project_id,
             None,
@@ -149,6 +161,7 @@ class Pipeline:
         )
 
     def run_transcribe(self, project_id: str, force: bool = False) -> StepState:
+        """Run the transcribe step. Skips it if already complete, unless force is True."""
         return self._run_step(
             project_id,
             None,
@@ -163,6 +176,7 @@ class Pipeline:
         target_language: str | None = None,
         force: bool = False,
     ) -> StepState:
+        """Run the translate step for target_language. Skips it if already complete, unless force is True."""
         return self._run_step(
             project_id,
             target_language,
@@ -177,6 +191,7 @@ class Pipeline:
         target_language: str | None = None,
         force: bool = False,
     ) -> StepState:
+        """Run the merge step for target_language. Skips it if already complete, unless force is True."""
         return self._run_step(
             project_id,
             target_language,
@@ -191,6 +206,7 @@ class Pipeline:
         target_language: str | None = None,
         force: bool = False,
     ) -> list[StepState]:
+        """Run all four steps in order and return their states."""
         states = [
             self.run_extract(project_id, force=force),
             self.run_transcribe(project_id, force=force),
@@ -208,6 +224,7 @@ class Pipeline:
         state_for: Callable[[ProjectPaths], StepState],
         operation: Callable[[StepState, ProjectPaths, Path], None],
     ) -> StepState:
+        """Check the step, write its output to a temporary file, log the run, then move the result into place."""
         project = self.store.load(project_id)
         paths = ProjectPaths(project, target_language)
         state = state_for(paths)
@@ -223,6 +240,7 @@ class Pipeline:
         return state_for(paths)
 
     def _extract_audio(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        """Run ffmpeg to extract audio into the temporary output file."""
         source_video = state.input_paths[0]
         result = extract_audio(source_video, tmp_output, self.settings.ffmpeg_binary)
         if result.stdout:
@@ -232,12 +250,14 @@ class Pipeline:
         _require_nonempty_file(tmp_output, "audio extraction produced an empty file")
 
     def _transcribe_audio(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        """Transcribe the MP3 and write the cues to the temporary output file."""
         cues = self.transcriber_factory(self.settings).transcribe(paths.audio)
         write_srt(tmp_output, cues)
         if not validate_srt(tmp_output):
             raise PipelineError("transcription produced invalid SRT")
 
     def _translate_subtitles(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        """Translate the source SRT and write the result to the temporary output file."""
         source_cues = read_srt(paths.source_srt)
         translated_cues = self.translator_factory(self.settings).translate(
             source_cues, paths.target_language
@@ -249,6 +269,7 @@ class Pipeline:
             raise PipelineError("translation produced invalid SRT")
 
     def _merge_subtitles(self, state: StepState, paths: ProjectPaths, tmp_output: Path) -> None:
+        """Merge the source and translated SRT into the temporary output file."""
         source_cues = read_srt(paths.source_srt)
         translated_cues = read_srt(paths.translated_srt)
         merged = merge_cues(source_cues, translated_cues)
@@ -257,12 +278,18 @@ class Pipeline:
             raise PipelineError("merge produced invalid SRT")
 
     def _translated_output_valid(self, paths: ProjectPaths) -> bool:
+        """True if the translated SRT exists and lines up with the source SRT."""
         return _files_aligned(paths.source_srt, paths.translated_srt)
 
     def _final_output_valid(self, paths: ProjectPaths) -> bool:
+        """True if the final SRT lines up with the source SRT."""
         return _files_aligned(paths.source_srt, paths.final_srt)
 
     def _run_logged(self, log_path: Path, operation: Callable[[], None]) -> None:
+        """Run operation with its output written to log_path.
+
+        On failure, the error and traceback are added to the log and the error is re-raised.
+        """
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with log_path.open("w", encoding="utf-8") as log_file:
@@ -295,6 +322,11 @@ def _step_state(
     output_exists: bool,
     messages: _StepMessages,
 ) -> StepState:
+    """Build a StepState from the checks.
+
+    Complete if the output is valid, missing input if the inputs are not ready, invalid if the
+    output exists but is broken, otherwise ready.
+    """
     if output_valid:
         status, can_run, message = StepStatus.COMPLETE, True, messages.complete
     elif not inputs_valid:
@@ -317,10 +349,12 @@ def _step_state(
 
 
 def _is_nonempty_file(path: Path) -> bool:
+    """True if the file exists and has content."""
     return path.exists() and path.stat().st_size > 0
 
 
 def _files_aligned(source_path: Path, other_path: Path) -> bool:
+    """True if both SRT files parse and their cues line up."""
     try:
         source_cues = read_srt(source_path)
         other_cues = read_srt(other_path)
@@ -330,10 +364,12 @@ def _files_aligned(source_path: Path, other_path: Path) -> bool:
 
 
 def _replace_file(tmp_output: Path, final_output: Path) -> None:
+    """Move tmp_output onto final_output, creating its folder if needed."""
     final_output.parent.mkdir(parents=True, exist_ok=True)
     os.replace(tmp_output, final_output)
 
 
 def _require_nonempty_file(path: Path, message: str) -> None:
+    """Raise PipelineError if the file is missing or empty."""
     if not _is_nonempty_file(path):
         raise PipelineError(message)

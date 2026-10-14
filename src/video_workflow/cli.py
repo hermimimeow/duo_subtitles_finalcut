@@ -21,11 +21,13 @@ CommandFunc = TypeVar("CommandFunc", bound=Callable[..., None])
 
 
 def _fail(message: str) -> NoReturn:
+    """Print an error message to stderr and exit with status 1."""
     typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(1)
 
 
 def _reports_errors(command: CommandFunc) -> CommandFunc:
+    """Decorator that prints known errors as a message and exits with status 1."""
     @functools.wraps(command)
     def wrapper(*args, **kwargs) -> None:
         try:
@@ -37,10 +39,12 @@ def _reports_errors(command: CommandFunc) -> CommandFunc:
 
 
 def _store() -> ProjectStore:
+    """Create a ProjectStore from the current settings."""
     return ProjectStore(load_settings())
 
 
 def _pipeline() -> Pipeline:
+    """Create a Pipeline from the current settings."""
     return Pipeline(load_settings())
 
 
@@ -139,11 +143,13 @@ def web() -> None:
 
 
 def _print_states(states: list[StepState]) -> None:
+    """Print the status of each step."""
     for state in states:
         _print_state(state)
 
 
 def _print_state(state: StepState) -> None:
+    """Print one step's status, output path and log path."""
     outputs = ", ".join(str(path) for path in state.output_paths)
     typer.echo(f"{state.name.value}: {state.status.value} - {state.message}")
     typer.echo(f"  output: {outputs}")

@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover - dependency is declared, fallback helps
 
 @dataclass(frozen=True)
 class Settings:
+    """Runtime settings loaded from .env by load_settings."""
     workspace_dir: Path = Path("workspace")
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
@@ -30,6 +31,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_settings(env_file: Path | str | None = PROJECT_ROOT / ".env") -> Settings:
+    """Load settings from the .env file and environment variables.
+
+    Relative WORKSPACE_DIR values resolve from the folder containing env_file.
+    Pass None to skip reading a file.
+    """
     if load_dotenv is not None and env_file:
         load_dotenv(env_file)
 
@@ -57,6 +63,7 @@ def load_settings(env_file: Path | str | None = PROJECT_ROOT / ".env") -> Settin
 
 
 def _empty_to_none(value: str | None) -> str | None:
+    """Return None for a missing or blank value, otherwise the stripped string."""
     if value is None:
         return None
     stripped = value.strip()

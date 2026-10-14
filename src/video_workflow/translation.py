@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 
 class TranslationError(RuntimeError):
+    """Raised when translation cannot run or Gemini's response is unusable."""
     pass
 
 
@@ -38,6 +39,7 @@ DEFAULT_RETRY_DELAYS = (2.0, 4.0)
 
 
 class GeminiTranslator:
+    """Translate subtitle cues with Gemini, in batches. Timings are copied from the source cues."""
     def __init__(
         self,
         settings: Settings,
@@ -45,12 +47,20 @@ class GeminiTranslator:
         retry_delays: tuple[float, ...] = DEFAULT_RETRY_DELAYS,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        """Store the settings and batching options.
+
+        retry_delays are the waits before each retry; sleep can be replaced in tests.
+        """
         self.settings = settings
         self.batch_size = max(batch_size, 1)
         self.retry_delays = retry_delays
         self.sleep = sleep
 
     def translate(self, cues: list[SubtitleCue], target_language: str) -> list[SubtitleCue]:
+        """Translate cues into target_language.
+
+        Returns cues with the same timings and new text.
+        """
         if not cues:
             raise TranslationError("No source cues to translate")
         if not self.settings.gemini_api_key:
@@ -73,6 +83,7 @@ class GeminiTranslator:
         cues: list[SubtitleCue],
         target_language: str,
     ) -> list[SubtitleCue]:
+        """Translate one batch of cues and return them with translated text."""
         response = self._generate_with_retries(client, cues, target_language)
         payload = response.parsed if getattr(response, "parsed", None) is not None else None
         if payload is None:
@@ -111,6 +122,7 @@ class GeminiTranslator:
 
 
 def build_translation_prompt(cues: list[SubtitleCue], target_language: str) -> str:
+    """Build the prompt that asks Gemini to translate the rows into target_language."""
     rows = [
         {
             "index": cue.index,
@@ -136,6 +148,10 @@ Rows:
 
 
 def apply_translation_payload(cues: list[SubtitleCue], payload: object) -> list[SubtitleCue]:
+    """Match Gemini's JSON translations to cues by index.
+
+    Raises TranslationError if the response is malformed or a row is missing.
+    """
     if not isinstance(payload, dict):
         raise TranslationError("Gemini returned an invalid JSON object")
     translations = payload.get("translations")
@@ -179,4 +195,5 @@ def _is_temporary(error: Exception) -> bool:
 
 
 def _batch(cues: list[SubtitleCue], batch_size: int) -> list[list[SubtitleCue]]:
+    """Split cues into consecutive lists of at most batch_size."""
     return [cues[index : index + batch_size] for index in range(0, len(cues), batch_size)]

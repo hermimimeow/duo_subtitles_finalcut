@@ -19,6 +19,10 @@ TEXT_PREVIEW_CHARS = 12000
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the FastAPI app.
+
+    Uses the settings given, or loads them from .env.
+    """
     settings = settings or load_settings()
     store = ProjectStore(settings)
     pipeline = Pipeline(settings, store)
@@ -28,6 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
+        """Home page: list the projects."""
         projects = store.list_projects()
         return templates.TemplateResponse(
             request,
@@ -41,6 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/projects")
     def create_project(project_id: str = Form(...)) -> RedirectResponse:
+        """Create a project from the form and redirect to its page."""
         project = store.create(project_id.strip())
         return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
@@ -50,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project_id: str,
         target: str | None = None,
     ) -> HTMLResponse:
+        """Show one project's page."""
         context = _project_context(request, store, pipeline, project_id, target)
         context["error"] = None
         return templates.TemplateResponse(request, "project.html", context)
@@ -62,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         target: str | None = Form(None),
         force: bool = Form(False),
     ) -> Response:
+        """Run one step from its button, then show the project page."""
         step_runs: dict[StepName, Callable[[], object]] = {
             StepName.EXTRACT: lambda: pipeline.run_extract(project_id, force=force),
             StepName.TRANSCRIBE: lambda: pipeline.run_transcribe(project_id, force=force),
@@ -79,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         target: str | None = Form(None),
         force: bool = Form(False),
     ) -> Response:
+        """Run all steps, then show the project page."""
         return _run_and_render(
             request,
             store,
@@ -99,6 +108,7 @@ def _run_and_render(
     target: str | None,
     action: Callable[[], object],
 ) -> Response:
+    """Run an action, then render the project page with any error message."""
     error = None
     try:
         action()
@@ -117,6 +127,7 @@ def _project_context(
     project_id: str,
     target: str | None,
 ) -> dict:
+    """Gather what the project page needs: project, paths, step states and previews."""
     project = store.load(project_id)
     effective_target = target or project.metadata.target_language
     paths = ProjectPaths(project, effective_target)
@@ -131,11 +142,13 @@ def _project_context(
 
 
 def _project_response(request: Request, context: dict) -> Response:
+    """Render only the project body for HTMX requests, otherwise the full page."""
     template = "_project_body.html" if request.headers.get("HX-Request") == "true" else "project.html"
     return templates.TemplateResponse(request, template, context)
 
 
 def _previews(paths: ProjectPaths) -> dict[str, str]:
+    """Build the text shown in each preview panel."""
     return {
         "video": _video_preview(paths),
         "audio": _file_summary(paths.audio),
@@ -150,6 +163,7 @@ def _previews(paths: ProjectPaths) -> dict[str, str]:
 
 
 def _video_preview(paths: ProjectPaths) -> str:
+    """List the files in video/, or say that none is staged."""
     videos = (
         sorted(path.name for path in paths.video_dir.iterdir() if path.is_file())
         if paths.video_dir.is_dir()
@@ -159,12 +173,14 @@ def _video_preview(paths: ProjectPaths) -> str:
 
 
 def _file_summary(path: Path) -> str:
+    """Name and size of a file, or Missing."""
     if not path.exists():
         return "Missing."
     return f"{path.name}\n{path.stat().st_size} bytes"
 
 
 def _text_preview(path: Path, max_chars: int = TEXT_PREVIEW_CHARS) -> str:
+    """The start of a text file, up to max_chars, or Missing or Empty."""
     if not path.exists():
         return "Missing."
     # Read one extra character so we know whether the file was longer than the limit

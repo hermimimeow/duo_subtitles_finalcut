@@ -7,14 +7,20 @@ from video_workflow.models import SubtitleCue
 
 
 class TranscriptionError(RuntimeError):
+    """Raised when transcription cannot run or produces no subtitle cues."""
     pass
 
 
 class FasterWhisperTranscriber:
+    """Turn an audio file into timed subtitle cues with faster-whisper."""
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
     def transcribe(self, audio_path: Path) -> list[SubtitleCue]:
+        """Transcribe audio_path and return one cue per speech segment.
+
+        Raises TranscriptionError if faster-whisper is missing or no speech is found.
+        """
         if not audio_path.exists():
             raise FileNotFoundError(audio_path)
 
