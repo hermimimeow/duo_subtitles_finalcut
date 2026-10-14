@@ -77,6 +77,8 @@ Default behavior:
 - Run later steps without rerunning earlier completed steps.
 - Require `--force` when intentionally overwriting an existing output from the CLI.
 - Preserve the last known-good output if a rerun fails.
+- Retry temporary Gemini errors (503, 429) on the translation batch that failed, before failing the step.
+- Print CLI errors as `Error: ...` and exit with code 1.
 
 ## Web App
 
@@ -141,7 +143,7 @@ Implemented:
 - Restartable pipeline status detection.
 - FFmpeg audio extraction wrapper.
 - faster-whisper transcription adapter.
-- Gemini translation adapter.
+- Gemini translation adapter, with per-batch retry for temporary errors.
 - SRT parsing, rendering, validation, and merge.
 - Typer CLI.
 - FastAPI/Jinja2/HTMX web app.
