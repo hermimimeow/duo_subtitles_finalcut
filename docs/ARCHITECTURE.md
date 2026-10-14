@@ -75,12 +75,12 @@ workspace/
     subtitles/
       project_1.yue.srt
       project_1.en.srt
-      project_1.final.srt
+      project_1.en.final.srt
     logs/
       extract-audio.log
       transcribe.log
       translate-en.log
-      merge.log
+      merge-en.log
     tmp/
 ```
 
@@ -97,6 +97,8 @@ workspace/
 ### Project Metadata
 
 `project.json` stores durable project metadata that should not live in `.env`.
+
+Opening a project never writes to disk. `project.json` is created when the project is created; if it is missing, the app uses defaults from `.env` in memory.
 
 Example:
 
@@ -115,7 +117,7 @@ The application may generate this file lazily for existing folders.
 
 ## Configuration
 
-Global settings are loaded from `.env`.
+Global settings are loaded from `.env`. A relative `WORKSPACE_DIR` is resolved from the folder that contains `.env`.
 
 ```env
 WORKSPACE_DIR=workspace
@@ -214,7 +216,7 @@ Input:
 
 Output:
 
-- `subtitles/{project_id}.final.srt`
+- `subtitles/{project_id}.{target_language}.final.srt`
 
 Behavior:
 
@@ -222,7 +224,7 @@ Behavior:
 - Confirm cue counts and timings match.
 - Render one bilingual SRT cue per source cue.
 - Default line order is source first, translation second.
-- Write `logs/merge.log`.
+- Write `logs/merge-{target_language}.log`.
 
 ## Step State Model
 

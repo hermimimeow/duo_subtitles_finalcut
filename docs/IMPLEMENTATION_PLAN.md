@@ -99,12 +99,12 @@ workspace/
     subtitles/
       project_1.yue.srt
       project_1.en.srt
-      project_1.final.srt
+      project_1.en.final.srt
     logs/
       extract-audio.log
       transcribe.log
       translate-en.log
-      merge.log
+      merge-en.log
     tmp/
 ```
 
@@ -115,7 +115,7 @@ workspace/
 - Extracted audio path is `audio/{project_id}.mp3`.
 - Source subtitle path is `subtitles/{project_id}.{source_language}.srt`.
 - Translated subtitle path is `subtitles/{project_id}.{target_language}.srt`.
-- Final merged subtitle path is `subtitles/{project_id}.final.srt`.
+- Final merged subtitle path is `subtitles/{project_id}.{target_language}.final.srt`.
 
 Default languages:
 
@@ -217,7 +217,7 @@ Deliverable:
 4. Default line order:
    - Cantonese source.
    - English translation.
-5. Write `subtitles/{project_id}.final.srt`.
+5. Write `subtitles/{project_id}.{target_language}.final.srt`.
 
 Deliverable:
 
@@ -302,4 +302,4 @@ Manual tests:
 - Whether to use `faster-whisper` exclusively or leave room for whisper.cpp as a second backend.
 - Exact Whisper language parameter for Cantonese transcription.
 - Whether web-triggered long-running steps should be synchronous initially or immediately use a background job registry.
-- Whether `project.json` should be required for every project or generated lazily when the project is first opened.
+- Resolved: `project.json` is written when a project is created. Opening a project without one uses in-memory defaults and writes nothing.
