@@ -19,7 +19,7 @@ def test_create_project_generates_folder_contract(tmp_path: Path) -> None:
     assert paths.audio == tmp_path / "project_1" / "audio" / "project_1.mp3"
     assert paths.source_srt == tmp_path / "project_1" / "subtitles" / "project_1.yue.srt"
     assert paths.translated_srt == tmp_path / "project_1" / "subtitles" / "project_1.en.srt"
-    assert paths.final_srt == tmp_path / "project_1" / "subtitles" / "project_1.final.srt"
+    assert paths.final_srt == tmp_path / "project_1" / "subtitles" / "project_1.en.final.srt"
 
 
 def test_list_projects_loads_existing_project_folders(tmp_path: Path) -> None:

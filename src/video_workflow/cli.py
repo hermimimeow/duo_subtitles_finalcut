@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -105,7 +106,7 @@ def run(
     """Run all needed pipeline steps in order."""
     try:
         states = _pipeline().run_all(project_id, target, force=force)
-    except (ProjectError, PipelineError, RuntimeError, OSError) as error:
+    except (ProjectError, PipelineError, RuntimeError, OSError, subprocess.SubprocessError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1) from error
     _print_states(states)
@@ -132,7 +133,7 @@ def web() -> None:
 def _run_single(operation) -> None:
     try:
         state = operation(_pipeline())
-    except (ProjectError, PipelineError, RuntimeError, OSError) as error:
+    except (ProjectError, PipelineError, RuntimeError, OSError, subprocess.SubprocessError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1) from error
     _print_state(state)

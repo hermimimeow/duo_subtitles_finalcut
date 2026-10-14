@@ -122,7 +122,7 @@ def apply_translation_payload(cues: list[SubtitleCue], payload: object) -> list[
         text = by_index.get(cue.index, "").strip()
         if not text:
             missing.append(cue.index)
-            text = "[translation missing]"
+            continue
         translated.append(SubtitleCue(cue.index, cue.start_seconds, cue.end_seconds, text))
 
     if missing:
