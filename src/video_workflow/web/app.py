@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -14,6 +15,7 @@ from video_workflow.projects import ProjectPaths, ProjectStore
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+TEXT_PREVIEW_CHARS = 12000
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -60,22 +62,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         target: str | None = Form(None),
         force: bool = Form(False),
     ) -> Response:
-        error = None
-        try:
-            if step_name == StepName.EXTRACT:
-                pipeline.run_extract(project_id, force=force)
-            elif step_name == StepName.TRANSCRIBE:
-                pipeline.run_transcribe(project_id, force=force)
-            elif step_name == StepName.TRANSLATE:
-                pipeline.run_translate(project_id, target, force=force)
-            elif step_name == StepName.MERGE:
-                pipeline.run_merge(project_id, target, force=force)
-        except Exception as exc:
-            error = str(exc)
-
-        context = _project_context(request, store, pipeline, project_id, target)
-        context["error"] = error
-        return _project_response(request, context)
+        step_runs: dict[StepName, Callable[[], object]] = {
+            StepName.EXTRACT: lambda: pipeline.run_extract(project_id, force=force),
+            StepName.TRANSCRIBE: lambda: pipeline.run_transcribe(project_id, force=force),
+            StepName.TRANSLATE: lambda: pipeline.run_translate(project_id, target, force=force),
+            StepName.MERGE: lambda: pipeline.run_merge(project_id, target, force=force),
+        }
+        return _run_and_render(
+            request, store, pipeline, project_id, target, step_runs[step_name]
+        )
 
     @app.post("/projects/{project_id}/run", response_class=HTMLResponse)
     def run_all(
@@ -84,17 +79,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         target: str | None = Form(None),
         force: bool = Form(False),
     ) -> Response:
-        error = None
-        try:
-            pipeline.run_all(project_id, target, force=force)
-        except Exception as exc:
-            error = str(exc)
-
-        context = _project_context(request, store, pipeline, project_id, target)
-        context["error"] = error
-        return _project_response(request, context)
+        return _run_and_render(
+            request,
+            store,
+            pipeline,
+            project_id,
+            target,
+            lambda: pipeline.run_all(project_id, target, force=force),
+        )
 
     return app
+
+
+def _run_and_render(
+    request: Request,
+    store: ProjectStore,
+    pipeline: Pipeline,
+    project_id: str,
+    target: str | None,
+    action: Callable[[], object],
+) -> Response:
+    error = None
+    try:
+        action()
+    except Exception as exc:
+        error = str(exc)
+
+    context = _project_context(request, store, pipeline, project_id, target)
+    context["error"] = error
+    return _project_response(request, context)
 
 
 def _project_context(
@@ -137,9 +150,11 @@ def _previews(paths: ProjectPaths) -> dict[str, str]:
 
 
 def _video_preview(paths: ProjectPaths) -> str:
-    if not paths.video_dir.is_dir():
-        return "No video file staged."
-    videos = sorted(path.name for path in paths.video_dir.iterdir() if path.is_file())
+    videos = (
+        sorted(path.name for path in paths.video_dir.iterdir() if path.is_file())
+        if paths.video_dir.is_dir()
+        else []
+    )
     return "\n".join(videos) if videos else "No video file staged."
 
 
@@ -149,10 +164,13 @@ def _file_summary(path: Path) -> str:
     return f"{path.name}\n{path.stat().st_size} bytes"
 
 
-def _text_preview(path: Path, max_chars: int = 12000) -> str:
+def _text_preview(path: Path, max_chars: int = TEXT_PREVIEW_CHARS) -> str:
     if not path.exists():
         return "Missing."
-    text = path.read_text(encoding="utf-8", errors="replace")
+    # Read one extra character so we know whether the file was longer than the limit
+    # without loading the whole file.
+    with path.open(encoding="utf-8", errors="replace") as file:
+        text = file.read(max_chars + 1)
     if len(text) > max_chars:
         return text[:max_chars] + "\n...[truncated]"
     return text or "Empty file."
