@@ -22,7 +22,6 @@ class StepStatus(str, Enum):
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
-SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav"}
 
 
 @dataclass(frozen=True)
