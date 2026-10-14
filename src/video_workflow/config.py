@@ -26,12 +26,22 @@ class Settings:
     web_port: int = 8000
 
 
-def load_settings(env_file: Path | str | None = ".env") -> Settings:
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_settings(env_file: Path | str | None = PROJECT_ROOT / ".env") -> Settings:
     if load_dotenv is not None and env_file:
         load_dotenv(env_file)
 
+    # Relative workspace paths are relative to the .env file, so the app finds
+    # the same workspace no matter which folder the command runs from.
+    base_dir = Path(env_file).resolve().parent if env_file else PROJECT_ROOT
+    workspace_dir = Path(os.getenv("WORKSPACE_DIR", "workspace"))
+    if not workspace_dir.is_absolute():
+        workspace_dir = base_dir / workspace_dir
+
     return Settings(
-        workspace_dir=Path(os.getenv("WORKSPACE_DIR", "workspace")),
+        workspace_dir=workspace_dir,
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         whisper_model=os.getenv("WHISPER_MODEL", "large-v3"),
