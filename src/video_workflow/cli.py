@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import functools
 import subprocess
-from pathlib import Path
-from typing import Optional
+from typing import Callable, NoReturn, Optional, TypeVar
 
 import typer
 
@@ -15,28 +15,40 @@ app = typer.Typer(help="Local video subtitle workflow.")
 projects_app = typer.Typer(help="Create and list projects.")
 app.add_typer(projects_app, name="projects")
 
+COMMAND_ERRORS = (ProjectError, PipelineError, RuntimeError, OSError, subprocess.SubprocessError)
 
-def _settings():
-    return load_settings()
+CommandFunc = TypeVar("CommandFunc", bound=Callable[..., None])
+
+
+def _fail(message: str) -> NoReturn:
+    typer.echo(f"Error: {message}", err=True)
+    raise typer.Exit(1)
+
+
+def _reports_errors(command: CommandFunc) -> CommandFunc:
+    @functools.wraps(command)
+    def wrapper(*args, **kwargs) -> None:
+        try:
+            command(*args, **kwargs)
+        except COMMAND_ERRORS as error:
+            _fail(str(error))
+
+    return wrapper  # type: ignore[return-value]
 
 
 def _store() -> ProjectStore:
-    return ProjectStore(_settings())
+    return ProjectStore(load_settings())
 
 
 def _pipeline() -> Pipeline:
-    settings = _settings()
-    return Pipeline(settings, ProjectStore(settings))
+    return Pipeline(load_settings())
 
 
 @projects_app.command("list")
+@_reports_errors
 def list_projects() -> None:
     """List projects under the workspace directory."""
-    try:
-        projects = _store().list_projects()
-    except ProjectError as error:
-        raise typer.BadParameter(str(error)) from error
-
+    projects = _store().list_projects()
     if not projects:
         typer.echo("No projects found.")
         return
@@ -45,81 +57,76 @@ def list_projects() -> None:
 
 
 @projects_app.command("create")
+@_reports_errors
 def create_project(project_id: str) -> None:
     """Create a project folder contract under the workspace directory."""
-    try:
-        project = _store().create(project_id)
-    except ProjectError as error:
-        raise typer.BadParameter(str(error)) from error
+    project = _store().create(project_id)
     typer.echo(f"Created project: {project.id}")
     typer.echo(str(project.root))
 
 
 @app.command("status")
+@_reports_errors
 def status(project_id: str, target: Optional[str] = typer.Option(None, "--target")) -> None:
     """Show pipeline status for a project."""
-    try:
-        states = _pipeline().status(project_id, target)
-    except (ProjectError, PipelineError) as error:
-        raise typer.BadParameter(str(error)) from error
-    _print_states(states)
+    _print_states(_pipeline().status(project_id, target))
 
 
 @app.command("extract")
+@_reports_errors
 def extract(project_id: str, force: bool = typer.Option(False, "--force")) -> None:
     """Extract MP3 audio from the staged source video."""
-    _run_single(lambda pipeline: pipeline.run_extract(project_id, force=force))
+    _print_state(_pipeline().run_extract(project_id, force=force))
 
 
 @app.command("transcribe")
+@_reports_errors
 def transcribe(project_id: str, force: bool = typer.Option(False, "--force")) -> None:
     """Transcribe extracted audio into source-language SRT."""
-    _run_single(lambda pipeline: pipeline.run_transcribe(project_id, force=force))
+    _print_state(_pipeline().run_transcribe(project_id, force=force))
 
 
 @app.command("translate")
+@_reports_errors
 def translate(
     project_id: str,
     target: Optional[str] = typer.Option(None, "--target"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Translate source-language SRT into target-language SRT."""
-    _run_single(lambda pipeline: pipeline.run_translate(project_id, target, force=force))
+    _print_state(_pipeline().run_translate(project_id, target, force=force))
 
 
 @app.command("merge")
+@_reports_errors
 def merge(
     project_id: str,
     target: Optional[str] = typer.Option(None, "--target"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Merge source and translated subtitles into final bilingual SRT."""
-    _run_single(lambda pipeline: pipeline.run_merge(project_id, target, force=force))
+    _print_state(_pipeline().run_merge(project_id, target, force=force))
 
 
 @app.command("run")
+@_reports_errors
 def run(
     project_id: str,
     target: Optional[str] = typer.Option(None, "--target"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Run all needed pipeline steps in order."""
-    try:
-        states = _pipeline().run_all(project_id, target, force=force)
-    except (ProjectError, PipelineError, RuntimeError, OSError, subprocess.SubprocessError) as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(1) from error
-    _print_states(states)
+    _print_states(_pipeline().run_all(project_id, target, force=force))
 
 
 @app.command("web")
 def web() -> None:
     """Start the local web app."""
-    settings = _settings()
+    settings = load_settings()
     try:
         import uvicorn
-    except ImportError as error:
-        raise typer.BadParameter("uvicorn is not installed.") from error
+    except ImportError:
+        _fail("uvicorn is not installed.")
 
     from video_workflow.web.app import create_app
 
@@ -129,15 +136,6 @@ def web() -> None:
         port=settings.web_port,
         reload=False,
     )
-
-
-def _run_single(operation) -> None:
-    try:
-        state = operation(_pipeline())
-    except (ProjectError, PipelineError, RuntimeError, OSError, subprocess.SubprocessError) as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(1) from error
-    _print_state(state)
 
 
 def _print_states(states: list[StepState]) -> None:
